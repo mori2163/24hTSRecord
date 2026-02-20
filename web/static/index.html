@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="24時間録画・緊急地震速報連動システム">
+    <title>24hTSRecord</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <header class="header">
+        <div class="header-inner">
+            <div class="header-left">
+                <span class="logo">24hTSRecord</span>
+            </div>
+            <nav class="nav" id="navTabs">
+                <button class="nav-item active" data-tab="dashboard">ダッシュボード</button>
+                <button class="nav-item" data-tab="history">履歴</button>
+                <button class="nav-item" data-tab="recordings">録画</button>
+                <button class="nav-item" data-tab="settings">設定</button>
+            </nav>
+            <div class="header-right">
+                <span class="connection-indicator" id="connectionStatus">
+                    <span class="dot"></span>
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <main class="content">
+
+        <!-- ダッシュボード -->
+        <section class="tab active" id="tab-dashboard">
+
+            <!-- EEWステータス（メインビジュアル） -->
+            <div class="eew-status" id="eewStatusBlock">
+                <div class="eew-status-inner" id="eewStatusInner">
+                    <p class="eew-status-text" id="eewStatusText">読み込み中...</p>
+                </div>
+            </div>
+
+            <!-- ステータスカード -->
+            <div class="grid-3">
+                <div class="card">
+                    <div class="card-label">録画状態</div>
+                    <div class="card-value" id="recordingStatus">--</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">録画ファイル</div>
+                    <div class="card-value"><span id="protectedFiles">0</span> / <span id="totalFiles">0</span> 保護中
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-label">対象チャンネル</div>
+                    <div class="card-value" id="channelName">--</div>
+                </div>
+            </div>
+
+            <!-- 現在の録画 -->
+            <div class="card" id="currentRecordingCard" style="display:none;">
+                <div class="card-label">現在の録画</div>
+                <div class="card-body" id="currentRecordingBody"></div>
+            </div>
+
+        </section>
+
+        <!-- EEW履歴 -->
+        <section class="tab" id="tab-history">
+            <div class="section-bar">
+                <h2>EEW 履歴</h2>
+                <button class="btn btn-ghost" id="refreshEEW">更新</button>
+            </div>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>発生日時</th>
+                            <th>震央地名</th>
+                            <th>M</th>
+                            <th>最大震度</th>
+                            <th>保存時間</th>
+                        </tr>
+                    </thead>
+                    <tbody id="eewTableBody">
+                        <tr>
+                            <td colspan="5" class="empty-cell">読み込み中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 録画ファイル -->
+        <section class="tab" id="tab-recordings">
+            <div class="section-bar">
+                <h2>録画ファイル</h2>
+                <button class="btn btn-ghost" id="refreshRecordings">更新</button>
+            </div>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>開始</th>
+                            <th>終了</th>
+                            <th>ファイル</th>
+                            <th>状態</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recordingsTableBody">
+                        <tr>
+                            <td colspan="4" class="empty-cell">読み込み中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 設定 -->
+        <section class="tab" id="tab-settings">
+            <h2>設定</h2>
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-label">EDCB 接続先</div>
+                    <div class="card-body">
+                        <div class="kv"><span>ホスト</span><span id="cfgHost">--</span></div>
+                        <div class="kv"><span>ポート</span><span id="cfgPort">--</span></div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-label">番組 / チューナー</div>
+                    <div class="card-body">
+                        <div class="kv">
+                            <span>チャンネル</span>
+                            <select id="cfgChSelect" class="btn" style="max-width: 180px; width:100%; text-align:left;">
+                                <option value="">取得中...</option>
+                            </select>
+                        </div>
+                        <div class="kv">
+                            <span>BonDriver</span>
+                            <select id="cfgTunerSelect" class="btn"
+                                style="max-width: 180px; width:100%; text-align:left;">
+                                <option value="0">自動選択</option>
+                            </select>
+                        </div>
+                        <div style="text-align: right; margin-top: 0.5rem;">
+                            <button class="btn btn-primary btn-sm" id="saveChannelBtn">保存</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-label">録画</div>
+                    <div class="card-body">
+                        <div class="kv"><span>録画間隔</span><span id="cfgRecInterval">--</span></div>
+                        <div class="kv"><span>先行予約数</span><span id="cfgRecAdv">--</span></div>
+                        <div class="kv"><span>出力先</span><span id="cfgRecDir">--</span></div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-label">EEW 監視</div>
+                    <div class="card-body">
+                        <div class="kv"><span>ポーリング間隔</span><span id="cfgEewInt">--</span></div>
+                        <div class="kv"><span>デフォルト保存</span><span id="cfgEewRet">--</span></div>
+                        <div class="kv"><span>バッファ</span><span id="cfgEewBuf">--</span></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 延長モーダル -->
+    <div class="overlay" id="extendModal">
+        <div class="modal">
+            <div class="modal-head">
+                <span>保存時間の変更</span>
+                <button class="modal-x" id="modalClose">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-info" id="modalEventInfo"></p>
+                <p class="modal-sub">現在: <strong id="modalCurrentHours"></strong></p>
+                <div class="btn-row" id="presetButtons">
+                    <button class="btn" data-hours="5">5h</button>
+                    <button class="btn" data-hours="12">12h</button>
+                    <button class="btn" data-hours="24">24h</button>
+                    <button class="btn" data-hours="48">48h</button>
+                    <button class="btn" data-hours="168">1週間</button>
+                    <button class="btn btn-accent" data-hours="87600">無期限</button>
+                </div>
+                <div class="custom-row">
+                    <input type="number" id="customHours" min="1" max="87600" value="12" placeholder="時間">
+                    <button class="btn btn-primary" id="customExtendBtn">設定</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- トースト -->
+    <div class="toasts" id="toastContainer"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>

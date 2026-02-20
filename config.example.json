@@ -1,0 +1,27 @@
+{
+    "edcb": {
+        "host": "192.168.11.100",
+        "port": 4510
+    },
+    "channel": {
+        "name": "",
+        "onid": 0,
+        "tsid": 0,
+        "sid": 0,
+        "tuner_id": 0
+    },
+    "recording": {
+        "interval_minutes": 60,
+        "output_directory": "C:\\Videos",
+        "advance_reserve_count": 2
+    },
+    "eew": {
+        "poll_interval_minutes": 60,
+        "default_retention_hours": 5.0,
+        "pre_buffer_minutes": 10
+    },
+    "web": {
+        "host": "127.0.0.1",
+        "port": 8080
+    }
+}
