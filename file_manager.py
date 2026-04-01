@@ -28,25 +28,23 @@ class FileManager:
             dt = dt.replace(tzinfo=JST)
         return dt
 
-    def _is_current_or_previous(self, file_start: datetime) -> bool:
-        """現在録画中または直前のファイルかどうかを判定"""
+    def _is_recent_buffer(self, file_start: datetime) -> bool:
+        """最近のファイル（EEW取得遅れを考慮して3時間前まで）かどうかを判定"""
         now = datetime.now(JST)
-        # 現在の時間枠の開始
-        current_slot = now.replace(minute=0, second=0, microsecond=0)
-        # 1つ前の時間枠
-        previous_slot = current_slot - timedelta(hours=1)
-        return file_start >= previous_slot
+        # 3時間前
+        recent_threshold = now - timedelta(hours=3)
+        return file_start >= recent_threshold
 
     def should_protect(self, file_start: datetime, file_end: datetime) -> bool:
         """
         ファイルが保護対象かどうかを判定する
 
         保護条件:
-        1. 現在録画中 or 直前のファイル
+        1. 最近のファイル（EEW取得遅れを考慮して3時間前まで）
         2. EEWイベントの保護時間範囲と重なる
         """
-        # 条件1: 現在録画中 or 直前
-        if self._is_current_or_previous(file_start):
+        # 条件1: 最近のファイル（3時間前まで）
+        if self._is_recent_buffer(file_start):
             return True
 
         # 条件2: EEWイベントの保護範囲と重なるか

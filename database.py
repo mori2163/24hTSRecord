@@ -98,13 +98,25 @@ class Database:
     def get_active_eew_events(self) -> list[dict]:
         """保護期間がまだ有効なEEWイベントを取得"""
         with self._get_conn() as conn:
-            rows = conn.execute("""
-                SELECT * FROM eew_events
-                WHERE datetime(occurrence_time, '+' || CAST(retention_hours AS TEXT) || ' hours')
-                      > datetime('now', 'localtime')
-                ORDER BY occurrence_time DESC
-            """).fetchall()
-            return [dict(row) for row in rows]
+            # occurrence_time はタイムゾーン付ISO8601なので、Python側でフィルタリングする
+            rows = conn.execute("SELECT * FROM eew_events ORDER BY occurrence_time DESC").fetchall()
+            
+            active_events = []
+            now = datetime.now(JST)
+            for row in rows:
+                r = dict(row)
+                try:
+                    dt = datetime.fromisoformat(r['occurrence_time'])
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=JST)
+                    
+                    retention = r.get('retention_hours', 5.0)
+                    if dt + timedelta(hours=retention) > now:
+                        active_events.append(r)
+                except ValueError:
+                    pass
+            
+            return active_events
 
     def extend_retention(self, event_id: int, hours: float) -> bool:
         """EEWイベントの保存時間を延長する"""
