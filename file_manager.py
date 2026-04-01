@@ -28,6 +28,13 @@ class FileManager:
             dt = dt.replace(tzinfo=JST)
         return dt
 
+    def _can_confirm_file_missing(self, file_path: str) -> bool:
+        """ファイル不存在を確定できる状態かどうかを判定する"""
+        parent_dir = os.path.dirname(file_path)
+        if not parent_dir:
+            return True
+        return os.path.isdir(parent_dir)
+
     def _is_recent_buffer(self, file_start: datetime) -> bool:
         """最近のファイル（EEW取得遅れを考慮して3時間前まで）かどうかを判定"""
         now = datetime.now(JST)
@@ -87,6 +94,42 @@ class FileManager:
 
         logger.info("保護状態を更新: 保護=%d件, 非保護=%d件", protected_count, unprotected_count)
 
+    def recover_inconsistent_deleted_flags(self) -> int:
+        """DBのdeletedフラグ不整合（deleted=1だが実ファイルあり）を復旧する"""
+        files = self.db.get_all_recording_files(include_deleted=True)
+        recovered_count = 0
+
+        for f in files:
+            if not bool(f.get('deleted')):
+                continue
+
+            file_path = f.get('file_path', '')
+            if not file_path or not os.path.exists(file_path):
+                continue
+
+            file_id = f.get('id')
+            if file_id is None:
+                continue
+
+            # 物理ファイルが存在するため、deletedフラグを戻して再評価対象にする
+            self.db.set_file_deleted(file_id, False)
+
+            try:
+                file_start = self._parse_time(f['start_time'])
+                file_end = self._parse_time(f['end_time'])
+                is_protected = self.should_protect(file_start, file_end)
+                self.db.update_protection_status(file_id, is_protected)
+            except (ValueError, KeyError) as e:
+                logger.warning("復旧時の保護判定エラー (id=%d): %s", file_id, e)
+
+            recovered_count += 1
+            logger.warning("deletedフラグ不整合を復旧: %s", file_path)
+
+        if recovered_count > 0:
+            logger.info("deletedフラグ不整合を %d 件復旧しました", recovered_count)
+
+        return recovered_count
+
     def delete_unprotected_files(self) -> int:
         """保護対象外の古いファイルを削除する"""
         files = self.db.get_all_recording_files(include_deleted=False)
@@ -103,6 +146,7 @@ class FileManager:
 
                 # 再度保護判定（念のため）
                 if self.should_protect(file_start, file_end):
+                    self.db.update_protection_status(f['id'], True)
                     continue
 
                 # ファイルを物理削除
@@ -110,7 +154,14 @@ class FileManager:
                     os.remove(file_path)
                     logger.info("ファイルを削除: %s", file_path)
                 else:
-                    logger.debug("ファイルが見つかりません（既に削除済み?）: %s", file_path)
+                    if not self._can_confirm_file_missing(file_path):
+                        logger.warning(
+                            "削除を保留: 保存先パスが未接続/未準備の可能性があります。次サイクルで再試行します: %s",
+                            file_path,
+                        )
+                        continue
+
+                    logger.debug("ファイルが見つからないため削除済みとして扱います: %s", file_path)
 
                 # DBで削除済みマーク
                 self.db.mark_file_deleted(f['id'])
@@ -131,7 +182,8 @@ class FileManager:
     def run_cycle(self) -> int:
         """1サイクル分の処理を実行"""
         logger.info("ファイル管理サイクルを開始")
+        recovered = self.recover_inconsistent_deleted_flags()
         self.update_protection_flags()
         deleted = self.delete_unprotected_files()
-        logger.info("ファイル管理サイクルを完了 (削除: %d件)", deleted)
+        logger.info("ファイル管理サイクルを完了 (復旧: %d件, 削除: %d件)", recovered, deleted)
         return deleted

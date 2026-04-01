@@ -165,14 +165,18 @@ class Database:
 
     def mark_file_deleted(self, file_id: int) -> bool:
         """録画ファイルを削除済みとしてマーク"""
+        return self.set_file_deleted(file_id, True)
+
+    def set_file_deleted(self, file_id: int, deleted: bool) -> bool:
+        """録画ファイルの削除済みフラグを更新"""
         try:
             with self._get_conn() as conn:
                 cursor = conn.execute("""
-                    UPDATE recording_files SET deleted = 1 WHERE id = ?
-                """, (file_id,))
+                    UPDATE recording_files SET deleted = ? WHERE id = ?
+                """, (1 if deleted else 0, file_id))
                 return cursor.rowcount > 0
         except sqlite3.Error as e:
-            logger.error("ファイル削除マークに失敗: %s", e)
+            logger.error("削除済みフラグ更新に失敗: %s", e)
             raise
 
     def update_protection_status(self, file_id: int, is_protected: bool) -> bool:
