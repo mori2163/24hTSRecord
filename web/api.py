@@ -55,30 +55,42 @@ def create_app(config: dict, db: Database, recorder: Recorder) -> FastAPI:
         files = db.get_all_recording_files(include_deleted=False)
         active_events = db.get_active_eew_events()
 
-        # 現在録画中のファイルを特定
-        current_recording = None
-        for f in files:
-            try:
-                start = datetime.fromisoformat(f['start_time'])
-                end = datetime.fromisoformat(f['end_time'])
-                if start.tzinfo is None:
-                    start = start.replace(tzinfo=JST)
-                if end.tzinfo is None:
-                    end = end.replace(tzinfo=JST)
-                if start <= now <= end:
-                    current_recording = f
-                    break
-            except (ValueError, KeyError):
-                continue
+        # まずEDCBの実状態から録画中判定を取得
+        edcb_status = await recorder.get_current_recording_status()
+
+        status = edcb_status.get("status", "waiting")
+        current_recording = edcb_status.get("current_recording")
+        status_source = "edcb"
+
+        # EDCB取得に失敗した場合は従来のDB判定にフォールバック
+        if not edcb_status.get("edcb_connected", False):
+            status_source = "db_fallback"
+            current_recording = None
+            for f in files:
+                try:
+                    start = datetime.fromisoformat(f['start_time'])
+                    end = datetime.fromisoformat(f['end_time'])
+                    if start.tzinfo is None:
+                        start = start.replace(tzinfo=JST)
+                    if end.tzinfo is None:
+                        end = end.replace(tzinfo=JST)
+                    if start <= now <= end:
+                        current_recording = f
+                        break
+                except (ValueError, KeyError):
+                    continue
+            status = "recording" if current_recording else "waiting"
 
         return {
-            "status": "recording" if current_recording else "waiting",
+            "status": status,
             "current_time": now.isoformat(),
             "current_recording": current_recording,
             "total_files": len(files),
             "protected_files": sum(1 for f in files if f.get('is_protected')),
             "active_eew_events": len(active_events),
             "channel": config.get("channel", {}),
+            "status_source": status_source,
+            "edcb_connected": edcb_status.get("edcb_connected", False),
         }
 
     @app.get("/api/eew_events")

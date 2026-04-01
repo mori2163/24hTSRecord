@@ -39,7 +39,7 @@ async function loadStatus() {
     try {
         const d = await api('/status');
         setDot(true);
-        document.getElementById('recordingStatus').textContent = d.status === 'recording' ? '録画中' : '待機中';
+        document.getElementById('recordingStatus').textContent = formatRecordingStatus(d.status);
         document.getElementById('totalFiles').textContent = d.total_files || 0;
         document.getElementById('protectedFiles').textContent = d.protected_files || 0;
         document.getElementById('channelName').textContent = d.channel?.name || '--';
@@ -64,6 +64,12 @@ async function loadStatus() {
 function setDot(ok) {
     const dot = document.querySelector('.dot');
     dot.className = ok ? 'dot ok' : 'dot err';
+}
+
+function formatRecordingStatus(status) {
+    if (status === 'recording') return '録画中';
+    if (status === 'waiting') return '録画なし';
+    return '状態不明';
 }
 
 // ── EEW ──

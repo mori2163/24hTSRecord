@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone, timedelta
+from typing import Any, Mapping, Sequence
 
 from edcb import CtrlCmdUtil
 from database import Database, JST
@@ -181,6 +182,144 @@ class Recorder:
 
         except Exception as e:
             logger.error("古い予約の削除中にエラー: %s", e)
+
+    def _is_our_reserve(self, reserve: Mapping[str, Any]) -> bool:
+        """このシステムが管理する予約かどうかを判定する"""
+        title = reserve.get('title', '')
+        if not title.startswith(self.TITLE_PREFIX):
+            return False
+
+        # チャンネル設定済みの場合はチャンネル一致も確認
+        if self.onid and self.tsid and self.sid:
+            return (
+                reserve.get('onid') == self.onid
+                and reserve.get('tsid') == self.tsid
+                and reserve.get('sid') == self.sid
+            )
+        return True
+
+    def _find_active_our_reserve(self, reserves: Sequence[Mapping[str, Any]], now: datetime) -> Mapping[str, Any] | None:
+        """現在時刻に該当する自システム予約を取得する"""
+        active_reserve = None
+
+        for reserve in reserves:
+            if not self._is_our_reserve(reserve):
+                continue
+
+            start_time = reserve.get('start_time')
+            if not isinstance(start_time, datetime):
+                continue
+
+            try:
+                duration_sec = int(reserve.get('duration_second', self.interval_minutes * 60))
+            except (TypeError, ValueError):
+                duration_sec = self.interval_minutes * 60
+
+            end_time = start_time + timedelta(seconds=max(duration_sec, 0))
+            if not (start_time <= now <= end_time):
+                continue
+
+            # 同時に複数候補がある場合は開始時刻が新しいものを優先
+            if active_reserve is None:
+                active_reserve = reserve
+                continue
+
+            prev_start = active_reserve.get('start_time')
+            if isinstance(prev_start, datetime) and start_time > prev_start:
+                active_reserve = reserve
+
+        return active_reserve
+
+    def _is_target_tuner_recording(self, tuner_process: Mapping[str, Any]) -> bool:
+        """対象チャンネルの録画中チューナーかどうかを判定する"""
+        if not tuner_process.get('rec_flag'):
+            return False
+
+        # 固定チューナー指定がある場合は最優先で一致判定
+        if self.tuner_id and tuner_process.get('tuner_id') == self.tuner_id:
+            return True
+
+        # チャンネル情報が未設定なら rec_flag のみで判定
+        if not self.onid or not self.tsid:
+            return True
+
+        return (
+            tuner_process.get('onid') == self.onid
+            and tuner_process.get('tsid') == self.tsid
+        )
+
+    def _build_current_recording_info(self, reserve: Mapping[str, Any]) -> dict[str, Any]:
+        """予約情報から現在録画情報レスポンスを作成する"""
+        start_time = reserve.get('start_time')
+
+        try:
+            duration_sec = int(reserve.get('duration_second', self.interval_minutes * 60))
+        except (TypeError, ValueError):
+            duration_sec = self.interval_minutes * 60
+
+        end_time = start_time + timedelta(seconds=max(duration_sec, 0)) if isinstance(start_time, datetime) else None
+
+        rec_file_name_list = reserve.get('rec_file_name_list') or []
+        planned_path = rec_file_name_list[0] if rec_file_name_list else ''
+
+        return {
+            'reserve_id': reserve.get('reserve_id', 0),
+            'title': reserve.get('title', ''),
+            'start_time': start_time.isoformat() if isinstance(start_time, datetime) else None,
+            'end_time': end_time.isoformat() if isinstance(end_time, datetime) else None,
+            'file_path': planned_path or '録画ファイルパス取得中'
+        }
+
+    async def get_current_recording_status(self) -> dict:
+        """EDCBから現在の録画状態を取得する"""
+        now = datetime.now(JST)
+        status_info = {
+            'status': 'waiting',
+            'current_recording': None,
+            'edcb_connected': False,
+        }
+
+        try:
+            reserves, tuner_processes = await asyncio.gather(
+                self.edcb.sendEnumReserve(),
+                self.edcb.sendEnumTunerProcess(),
+            )
+        except Exception as e:
+            logger.warning("EDCBから録画状態を取得できませんでした: %s", e)
+            return status_info
+
+        if reserves is None or tuner_processes is None:
+            logger.warning("EDCBから録画状態の取得に失敗しました（予約一覧またはチューナー情報が取得できません）")
+            return status_info
+
+        status_info['edcb_connected'] = True
+
+        active_reserve = self._find_active_our_reserve(reserves, now)
+        if active_reserve is None:
+            return status_info
+
+        target_recording = any(self._is_target_tuner_recording(tp) for tp in tuner_processes)
+        any_recording = any(bool(tp.get('rec_flag')) for tp in tuner_processes)
+        has_target_hint = bool(self.tuner_id or (self.onid and self.tsid))
+        is_recording = target_recording if has_target_hint else any_recording
+
+        if not is_recording:
+            return status_info
+
+        current_recording = self._build_current_recording_info(active_reserve)
+
+        reserve_id = active_reserve.get('reserve_id', 0)
+        if isinstance(reserve_id, int) and reserve_id > 0:
+            try:
+                rec_file_path = await self.edcb.sendGetRecFilePath(reserve_id)
+                if rec_file_path:
+                    current_recording['file_path'] = rec_file_path
+            except Exception as e:
+                logger.debug("録画ファイルパス取得に失敗しました (reserve_id=%s): %s", reserve_id, e)
+
+        status_info['status'] = 'recording'
+        status_info['current_recording'] = current_recording
+        return status_info
 
     def update_config(self, config: dict):
         """設定を更新する"""
